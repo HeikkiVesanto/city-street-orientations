@@ -27,6 +27,13 @@ city, run this instead::
 
     python street_orientation.py single data/my_cities.json
 
+Added shapefile support. Generate files in images/ for all, cities in
+data/cities.shp must be in wgs84, must have an attribute that has names,
+which must be called settl_name or the script must be modified::
+
+    python street_orientation.py shp data/cities.shp
+    
+    
 .. _osmnx example: https://github.com/gboeing/osmnx-examples/blob/master/notebooks/17-street-network-orientations.ipynb
 .. _accompanying blogpost: http://geoffboeing.com/2018/07/comparing-city-street-orientations/
 .. _blog post: https://rixx.de/blog/street-orientantions/
