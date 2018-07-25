@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import re
 from contextlib import suppress
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,9 @@ import numpy as np
 import osmnx as ox
 import pandas as pd
 import requests
+
+import fiona
+from shapely.geometry import shape
 
 
 # Configuration, or what passes as such
@@ -19,9 +23,19 @@ title_font = {'size': 24, 'weight': 'bold', **font}
 xtick_font = {'size': 10, 'alpha': 1.0, **font, **tick_font}
 ytick_font = {'size': 9, 'alpha': 0.2, **font, **tick_font}
 
-ox.config(log_console=True, use_cache=True)
+ox.config(log_console=False, use_cache=True)
 weight_by_length = False
 
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [ atoi(c) for c in re.split('(\d+)', text) ]
 
 def polar_plot(ax, bearings, slices=36, title=''):
     """Draw a polar histogram for a set of edge bearings."""
@@ -73,9 +87,12 @@ def count_and_merge(n, bearings):
     return np.array(count_merged)
 
 
-def get_bearing(place, query):
+def get_bearing(place, query, shape_name=None):
     try:
-        graph = ox.graph_from_place(query, network_type='drive')
+        if not shape_name:
+            graph = ox.graph_from_place(query, network_type='drive')
+        else:
+            graph = ox.graph_from_polygon(query, network_type='drive')
     except Exception:
         return
 
@@ -118,17 +135,46 @@ def load_places():
         print(f'Tried and failed to open file at {sys.argv[-1]}. '
               'Please pass a json file with city data to this program.')
         sys.exit(-1)
+    print(result)
     return result
 
 
-def get_bearings(places):
+def load_shapefile():
+    result = {}
     try:
-        gdf = ox.gdf_from_places(places.values())
+        shp = sys.argv[-1]
+        print(shp)
+        shapef = fiona.open(shp, encoding='utf-8')
+        feat = shapef.next()
+        count = 1
+        while feat:
+            shp_geom = shape(feat['geometry'])
+            name = feat['properties']['settl_name'] # Change to what you name attribute is
+            result[name] = shp_geom
+            print(name)
+            print(count)
+            count += 1
+            try:
+                feat = shapef.next()
+            except Exception:
+                break
+    except Exception:
+        print(f'Tried and failed to open file at {sys.argv[-1]}. '
+              'Please pass a shape file with city data to this program.')
+        sys.exit(-1)
+    print('SHP results OK')
+    return result
+
+
+def get_bearings(places, shape_name=None):
+    try:
+        if not shape_name:
+            gdf = ox.gdf_from_places(places.values())
     except Exception as e:
         print(f'Failed to load city data: {e}')
 
     bearings = {
-        place: get_bearing(place, places[place])
+        place: get_bearing(place, places[place], shape_name)
         for place in sorted(places.keys())
     }
     return {
@@ -138,9 +184,13 @@ def get_bearings(places):
     }
 
 
-def print_list():
-    places = load_places()
-    bearings = get_bearings(places)
+def print_list(shape_name=None):
+    if not shape_name:
+        places = load_places()
+        bearings = get_bearings(places)
+    else:
+        places = load_shapefile()
+        bearings = get_bearings(places, 'shp')
     # create figure and axes
     n = len(places)
     if n < 2:
@@ -156,7 +206,7 @@ def print_list():
     axes = [item for sublist in axes for item in sublist]
 
     # plot each city's polar histogram
-    for ax, place in zip(axes, sorted(places.keys())):
+    for ax, place in zip(axes, sorted(places.keys(), key=natural_keys)):
         if place in bearings:
             try:
                 polar_plot(ax, bearings[place][1], title=place)
@@ -238,6 +288,9 @@ def print_help():
     print('                           cities in data/cities.json')
     print('  single data/cities.json  Generate files in images/ for all, cities in')
     print('                           data/cities.json')
+    print('  shp data/cities.shp      Generate files in images/ for all, cities in')
+    print('                           data/cities.shp must be in wgs84, must have an attribute that has names,')
+    print('                           which must be called settl_name or the script must be modified')
 
 
 if __name__ == '__main__':
@@ -257,6 +310,11 @@ if __name__ == '__main__':
             print(f'Error during image generation: {e}.')
     elif mode == 'check':
         check_places()
+    elif mode == 'shp':
+        try:
+            print_list('shp')
+        except Exception as e:
+            print(f'Error during list generation: {e}.')
     else:
         print_help()
         sys.exit(-1)
